@@ -6,7 +6,7 @@
   </picture>
 </div>
 
-Yinying **(阴影)** es una aplicación web interactiva en la que tu mano actúa simultáneamente como control y personaje. A través de la cámara web directamente en el navegador, el sistema detecta los gestos de la mano en tiempo real para dar vida a marionetas de sombras tradicionales dentro de un escenario digital de papel recortado.
+Yinying es una aplicación web interactiva en la que tu mano actúa simultáneamente como control y personaje. A través de la cámara web directamente en el navegador, el sistema detecta los gestos de la mano en tiempo real para dar vida a marionetas de sombras tradicionales dentro de un escenario digital de papel recortado.
 
 No se requiere teclado ni ratón para controlar los personajes: la app traslada el clásico juego infantil de sombras chinescas a una experiencia interactiva accesible desde la web.
 

@@ -3,35 +3,26 @@
 
 <head>
   <meta charset="utf-8">
-  <title>Teatro de Sombras</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yinying · Teatro de Sombras</title>
+
+  <!-- Librerías (versiones fijas) -->
   <script src="https://cdn.jsdelivr.net/npm/p5@1.11.3/lib/p5.min.js"></script>
   <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
-  <style>
-    html,
-    body {
-      margin: 0;
-      height: 100%;
-      background: #111;
-    }
 
-    body {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-
-    /* El lienzo se mantiene en 16:9 y se ajusta a la ventana sin deformarse */
-    canvas {
-      width: min(100vw, calc(100vh * 16 / 9)) !important;
-      height: auto !important;
-      aspect-ratio: 16 / 9;
-      image-rendering: pixelated;
-    }
-  </style>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 
 <body>
-  <script src="sketch.js"></script>
+  <!-- El ORDEN importa: cada archivo usa lo definido en los anteriores -->
+  <script src="js/config.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/hands.js"></script>
+  <script src="js/gestures.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/theater.js"></script>
+  <script src="js/debug.js"></script>
+  <script src="js/main.js"></script>
 </body>
 
 </html>

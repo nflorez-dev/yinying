@@ -1,0 +1,22 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #111;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* El lienzo se mantiene en 16:9 y se ajusta a la ventana sin deformarse */
+canvas {
+  display: block;
+  width: min(100vw, calc(100vh * 16 / 9)) !important;
+  height: auto !important;
+  aspect-ratio: 16 / 9;
+  image-rendering: pixelated;
+}

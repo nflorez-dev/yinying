@@ -48,6 +48,20 @@ function crearFondoCrema() {
 
 function dibujarTeatro() {
   noSmooth();
+  background(26, 18, 16);
+
+  // reloj de la obra: actos, escenario y grabación (ver escenario.js)
+  const dt = Math.min(deltaTime, 100);
+  Obra.avanzar(dt);
+
+  const E = CFG.ESCALA;
+  const amp = Escenario.temblor();
+  push();
+  if (amp > 0) { // temblor: saltos de 1 px de arte
+    const k = floor(millis() / 60);
+    translate(round((hashN(k) - 0.5) * 2 * amp) * E, round((hashN(k + 99) - 0.5) * 2 * amp) * E);
+  }
+
   image(fondoCrema, 0, 0, W, H);
 
   // luz de vela: parpadeo en pasos (como el resto de la animación)
@@ -56,41 +70,72 @@ function dibujarTeatro() {
   fill(255, 205, 110, luz);
   rect(0, 0, W, H);
 
-  // sombras (detrás del marco)
+  Escenario.dibujarFondo();   // luna, nubes, eclipse
+  Escenario.dibujarProps();   // árboles, cajas, casas... (detrás de las sombras)
+
   const frame = floor(millis() / 220) % 3; // 3 fotogramas, estilo Baba Is You
-  const vivos = new Set();
-  for (const a of actoresActivos()) {
-    if (a.tipo === "dragon") {
-      const c = suave(a.key + "c", enEscenario(a.cabeza), vivos);
-      const b = suave(a.key + "b", enEscenario(a.cuerpo), vivos);
-      if (dragonListo()) dibujarDragonSprite(c, b, frame);
-      else sombraDragon(c, b, frame);
-    } else {
-      const pos = suave(a.key, enEscenario(a.pos), vivos);
-      const est = estiloSprite(a.key, a); // tamaño (distancia) y dirección (mano)
-      if (a.tipo === "conejo" && listo("conejo")) {
-        dibujarSprite("conejo", frame, pos.x, pos.y, est.flip, est.k);
-      } else if (a.tipo === "pajaro" && listo("pajaro")) {
-        dibujarSprite("pajaro", frame, pos.x, pos.y, est.flip, est.k);
-      } else {
-        push();
-        translate(pos.x, pos.y);
-        scale(est.flip ? -est.k : est.k, est.k);
-        fill(...TINTA);
-        noStroke();
-        if (a.tipo === "conejo") sombraConejo(frame);
-        if (a.tipo === "pajaro") sombraPajaro(frame); // respaldo si falta el sprite
-        pop();
-      }
-    }
-  }
-  for (const id in suaves) if (!vivos.has(id)) delete suaves[id];
-  for (const id in extras) if (!vivos.has(id)) delete extras[id];
+  const snap = dibujarSombras(frame);
+  Obra.grabar(snap, dt);
+
+  Escenario.dibujarFrente();  // lluvia, fuego, agua, oscuridad, destellos
 
   // marco encima (cortinas, cenefa y suelo)
   image(marco, 0, 0, W, H);
+  pop();
 
+  Escenario.dibujarHUD();     // tarjetas de acto, título, fin
   if (showPip) dibujarPip();
+}
+
+// En vivo: las sombras vienen de los gestos. En la repetición: del grabado.
+// Devuelve la lista de sombras dibujadas (para grabarla).
+function dibujarSombras(frame) {
+  const snap = [];
+
+  if (Acts.phase === "replay" || Acts.phase === "end") {
+    for (const s of Escenario.actoresReplay()) pintarSombra(s, frame);
+    return snap;
+  }
+
+  const vivos = new Set();
+  for (const a of actoresActivos()) {
+    let s;
+    if (a.tipo === "dragon") {
+      const c = suave(a.key + "c", enEscenario(a.cabeza), vivos);
+      const b = suave(a.key + "b", enEscenario(a.cuerpo), vivos);
+      s = { key: a.key, t: "dragon", c, b };
+    } else {
+      const pos = suave(a.key, enEscenario(a.pos), vivos);
+      const est = estiloSprite(a.key, a); // tamaño (distancia) y dirección (mano)
+      s = { key: a.key, t: a.tipo, x: pos.x, y: pos.y, flip: est.flip, k: est.k };
+    }
+    pintarSombra(s, frame);
+    snap.push(s);
+  }
+  for (const id in suaves) if (!vivos.has(id)) delete suaves[id];
+  for (const id in extras) if (!vivos.has(id)) delete extras[id];
+  return snap;
+}
+
+// dibuja UNA sombra a partir de su descripción (sirve en vivo y en la repetición)
+function pintarSombra(s, frame) {
+  if (s.t === "dragon") {
+    if (dragonListo()) dibujarDragonSprite(s.c, s.b, frame);
+    else sombraDragon(s.c, s.b, frame);
+  } else if (s.t === "conejo" && listo("conejo")) {
+    dibujarSprite("conejo", frame, s.x, s.y, s.flip, s.k);
+  } else if (s.t === "pajaro" && listo("pajaro")) {
+    dibujarSprite("pajaro", frame, s.x, s.y, s.flip, s.k);
+  } else {
+    push();
+    translate(s.x, s.y);
+    scale(s.flip ? -s.k : s.k, s.k);
+    fill(...TINTA);
+    noStroke();
+    if (s.t === "conejo") sombraConejo(frame);
+    if (s.t === "pajaro") sombraPajaro(frame); // respaldo si falta el sprite
+    pop();
+  }
 }
 
 // la sombra se queda dentro del escenario (entre las cortinas y sobre el suelo)
@@ -208,4 +253,3 @@ function dibujarPip() {
   textSize(11 * U);
   text(act.length ? act.map((a) => a.tipo).join(" · ") : "sin gesto", x + 6, y + PH - 11);
 }
-

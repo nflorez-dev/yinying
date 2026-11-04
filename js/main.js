@@ -34,6 +34,7 @@ function setup() {
     hands = results;
   });
   textFont("monospace");
+  conectarObra(); // enlaza el director de actos con el escenario
 }
 
 function draw() {
@@ -67,4 +68,5 @@ function keyPressed() {
   if (key === "c" || key === "C") showPip = !showPip;
   if (key === "m" || key === "M") CFG.INVERTIR_MANOS = !CFG.INVERTIR_MANOS;
   if (key === "f" || key === "F") fullscreen(!fullscreen());
+  if (key === " " || keyCode === ENTER) Obra.pedirInicio(); // empezar / otra obra
 }

@@ -4,9 +4,9 @@
 // Tamaño de UN fotograma, en píxeles de arte. Si cambias el tamaño de un
 // sprite en Aseprite, cámbialo aquí.
 const SPR_DIM = {
-  conejo: [32, 40],   // el conejo está dibujado MIRANDO A LA DERECHA
-  pajaro: [44, 36],   // el pájaro está dibujado MIRANDO A LA DERECHA
-  cabeza: [56, 40],   // la cabeza del dragón está dibujada MIRANDO A LA IZQUIERDA
+  conejo: [32, 40],   // el conejo está dibujado MIRANDO A LA DERECHA (sus 3 fotogramas son el salto)
+  pajaro: [44, 36],   // el pájaro está dibujado MIRANDO A LA DERECHA (sus 3 fotogramas son el aleteo)
+  cabeza: [56, 40],   // la cabeza del dragón está dibujada MIRANDO A LA IZQUIERDA, sin cuello (la une el segmento)
   cuerpo: [40, 34],
   segmento: [28, 26],
   cola: [44, 28],     // la cola está dibujada saliendo hacia la DERECHA
@@ -45,12 +45,60 @@ function dibujarSprite(nombre, frame, x, y, flip, k = CFG.ESCALA) {
   pop();
 }
 
+// ---------------------------------------------------------------
+// ANIMACIÓN DE MOVIMIENTO
+//  · conejo: camina a saltitos. El ciclo (agachado -> en el aire -> cayendo)
+//    avanza con la DISTANCIA recorrida, así no "patina". Quieto = agachado.
+//  · pájaro: vuela, así que sus 3 fotogramas son el aleteo (ala arriba ->
+//    atrás -> abajo). Al moverse aletea; quieto se queda en idle (un fotograma fijo).
+//  · dragón: no usa esto (se mueve con la ondulación de dibujarDragonSprite).
+// ---------------------------------------------------------------
+const ANIM = {
+  PASO: 5,            // píxeles de arte que recorre el conejo por cada fotograma del salto
+  V_ARRANCA: 0.35,    // velocidad (px de arte por fotograma de pantalla) para empezar a moverse
+  V_PARA: 0.15,       // velocidad por debajo de la cual se considera quieto (histéresis)
+  SUAVIZADO: 0.3,     // 0..1: cuánto se suaviza la velocidad (la mano tiembla)
+  REMATE: 6,          // al parar, fotogramas de pantalla por paso para terminar el salto
+  ALETEO_VUELO: 4,    // fotogramas de pantalla por fotograma de aleteo, en movimiento
+  PAJARO_IDLE: 1,     // fotograma del pájaro cuando está quieto (1 = ala atrás, a media altura)
+};
+
+// Devuelve el fotograma (0, 1 o 2) que le toca ahora a un conejo/pájaro.
+// "e" es su ficha de estado (extras[id]); se llama una vez por fotograma.
+function animarActor(e, tipo, pos) {
+  const E = CFG.ESCALA;
+  if (e.px === undefined) {
+    Object.assign(e, { px: pos.x, py: pos.y, v: 0, mov: false, fase: 0, t: 0 });
+  }
+  const paso = Math.hypot(pos.x - e.px, pos.y - e.py) / E; // px de arte recorridos
+  e.px = pos.x;
+  e.py = pos.y;
+  e.v = lerp(e.v, paso, ANIM.SUAVIZADO);
+  e.mov = e.mov ? e.v > ANIM.V_PARA : e.v > ANIM.V_ARRANCA;
+  e.t++;
+
+  if (tipo === "pajaro") {
+    if (!e.mov) return ANIM.PAJARO_IDLE; // quieto: idle
+    return Math.floor(e.t / ANIM.ALETEO_VUELO) % 3;
+  }
+
+  // conejo
+  if (e.mov) {
+    e.fase += e.v / ANIM.PASO;
+  } else if (Math.floor(e.fase) % 3 !== 0 && e.t % ANIM.REMATE === 0) {
+    e.fase = Math.floor(e.fase) + 1; // termina el salto en curso hasta quedar agachado
+  }
+  return Math.floor(e.fase) % 3;
+}
+
 // Tamaño y dirección ESTABLES de un conejo/pájaro:
 //  · tamaño: crece al acercar la mano (tam). Se suaviza y se redondea a un
 //    número entero de píxeles por píxel de arte, para que el pixel art no se
 //    deforme; crece "a saltos", como el resto de la animación.
 //  · dirección: mano izquierda -> mira a la derecha; mano derecha -> a la izquierda.
 //    Los sprites están dibujados MIRANDO A LA DERECHA.
+//  · frame: fotograma de la animación (salto del conejo / aleteo del pájaro).
+//    Úsalo en vez del fotograma global:  dibujarSprite(a.tipo, st.frame, x, y, st.flip, st.k)
 function estiloSprite(id, a) {
   const objetivo = constrain((a.tam / CFG.TAM_REF) * CFG.ESCALA, CFG.ESC_MIN, CFG.ESC_MAX);
   const flipDeseado = !a.izq;
@@ -68,7 +116,14 @@ function estiloSprite(id, a) {
     e.flip = flipDeseado;
     e.cont = 0;
   }
-  return { k: constrain(e.k, CFG.ESC_MIN, CFG.ESC_MAX), flip: e.flip };
+  const frame = a.pos ? animarActor(e, a.tipo, a.pos) : 0;
+  return { k: constrain(e.k, CFG.ESC_MIN, CFG.ESC_MAX), flip: e.flip, frame };
+}
+
+// Atajo: dibuja un conejo o pájaro (un actor de actoresActivos()) ya animado.
+function dibujarActor(a) {
+  const st = estiloSprite(a.key, a);
+  dibujarSprite(a.tipo, st.frame, a.pos.x, a.pos.y, st.flip, st.k);
 }
 
 // Dragón: cabeza en la mano abierta, cuerpo en el puño, segmentos entre los

@@ -18,14 +18,10 @@ const Escenario = (() => {
   const X0 = 64, X1 = 256;      // rango horizontal útil del escenario
   const CIELO_Y = 46;           // altura de luna / eclipse / nubes
   const INT_ACTO = [0.15, 0.3, 0.5, 0.7, 1.0]; // igual que acts.js
-  const FUEGO_MS = 7000;        // lo que tarda un objeto en quemarse
+  const FUEGO_MS = DURACIONES.incendio; // lo que tarda un objeto en quemarse
   const TRUENOS = [2500, 5200, 5500, 9000, 11000];
   const N_METEOROS = 6;
-  const DUR = {
-    lluvia: 12000, viento: 8000, luna: 22000, "estrella fugaz": 1800,
-    nube: 16000, inundacion: 14000, tormenta: 14000, eclipse: 14000,
-    terremoto: 8000, meteoritos: 10000,
-  };
+  const DUR = DURACIONES;       // misma tabla que usa el director (config.js)
   const ALTO = { arbol: 46, arbusto: 14, caja: 22, roca: 12, casa: 44, farol: 52 };
 
   let ahora = 0;        // reloj del escenario (ms). En la repetición corre 3x

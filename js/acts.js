@@ -7,10 +7,14 @@
 const Acts = (() => {
   const CFG = {
     totalActs: 5,
-    actMs: [10000, 10000, 10000, 10000, 10000], // el clímax dura más
+    actMs: [10000, 10000, 10000, 10000, 22000], // el clímax dura más
     interludeMs: 4000,
     replaySpeed: 5,
-    minGap: 0.12,   // separación mínima (0..1) entre elementos de suelo del mismo acto
+    minGap: 0.14,       // separación mínima (0..1) entre objetos de suelo
+    maxProps: 7,        // objetos de suelo vivos a la vez
+    minEventGap: 650,   // ms mínimos entre dos eventos (evita ráfagas)
+    fullGap: 1000,      // ms de respiro entre efectos de pantalla completa
+    maxSky: 2,          // efectos de cielo simultáneos
   };
 
   // Qué puede aparecer. Edita estas listas para que coincidan con tus sprites.
@@ -22,16 +26,32 @@ const Acts = (() => {
   };
   const LAYER = { object: 'ground', hazard: 'ground', sky: 'sky', epic: 'full', finale: 'full' };
 
-  // Receta de cada acto: qué tipo de evento ocurre y en qué orden.
+  // Receta de cada acto. Los desastres grandes se reparten entre actos para
+  // que no se pisen; el acto 5 se reserva para el gran final.
   const TEMPLATE = [
-    ['object', 'object'],                                         // 1: calma
-    ['object', 'sky', 'object'],                                  // 2
-    ['object', 'hazard', 'sky', 'object'],                        // 3
-    ['object', 'hazard', 'object', 'sky', 'hazard'],              // 4
-    ['sky', 'hazard', 'hazard', 'epic', 'hazard', 'epic', 'epic'] // 5: CLÍMAX
+    ['object', 'object'],                                  // 1: calma
+    ['object', 'sky', 'object'],                           // 2: algo cambia
+    ['epic', 'object', 'hazard', 'object'],                // 3: surge el peligro
+    ['object', 'epic', 'hazard', 'object', 'sky'],         // 4: todo se complica
+    ['epic', 'hazard', 'sky', 'finale']                    // 5: el gran final
   ];
   const BASE_INTENSITY = [0.15, 0.3, 0.5, 0.7, 1.0];
-  const FINALE_AT = 0.86; // el gran final ocurre al 86% del acto 5
+  // El final empieza antes de la mitad del acto 5: así le queda tiempo para
+  // desplegarse entero en vez de quedar cortado por la repetición.
+  const FINALE_AT = 0.55;
+
+  // Familia visual de cada evento: evita que se pisen efectos incompatibles.
+  const GRUPO = {
+    incendio: 'fuego', inundacion: 'agua',
+    lluvia: 'clima', viento: 'clima',
+    luna: 'cielo', nube: 'cielo', 'estrella fugaz': 'cielo',
+    tormenta: 'full', eclipse: 'full', terremoto: 'full', meteoritos: 'full',
+    finale: 'full',
+  };
+  const GRUPO_KIND = { object: 'suelo', hazard: 'peligro', sky: 'cielo', epic: 'full', finale: 'full' };
+  // Si un tipo no cabe (por choque o por falta de sitio), se prueba otro.
+  const ALTERNATIVAS = { epic: ['sky', 'hazard'], hazard: ['sky', 'object'], sky: ['object'], object: [] };
+  const DUR = DURACIONES; // definido en config.js (misma tabla que escenario.js)
 
   const hooks = {
     onActIntro: (n, total) => {},
@@ -48,6 +68,7 @@ const Acts = (() => {
   let seed = 0, rng = Math.random;
   let plan = [], log = [], planIdx = 0;
   let replayT = 0, replayIdx = 0;
+  let bags = {}, ultimoNombre = null, usadosActo = new Set();
 
   const actLen = () => CFG.actMs[Math.max(0, act - 1)];
   const clamp01 = (v) => Math.max(0, Math.min(1, v));
@@ -61,62 +82,246 @@ const Acts = (() => {
     };
   }
 
-  function pick(kind, avoid) {
-    const pool = POOLS[kind].filter((n) => n !== avoid);
-    return pool[Math.floor(rng() * pool.length)];
+  // --- selección con bolsa: variedad sin repetir el mismo nombre seguido ---
+  function barajar(a) {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
   }
 
-  function freeX(used) {
-    let x = 0.5;
-    for (let i = 0; i < 10; i++) {
-      x = 0.08 + rng() * 0.84;
-      if (used.every((u) => Math.abs(u - x) >= CFG.minGap)) break;
+  function sacar(kind) {
+    let bag = bags[kind];
+    if (!bag) bag = bags[kind] = [];
+    if (!bag.length) bag.push(...barajar(POOLS[kind].slice()));
+
+    // Prefiere un nombre que no haya salido en este acto ni sea el último
+    // colocado. Si no queda, permite repetir dentro del acto, pero no seguido.
+    const libre = (n) => n !== ultimoNombre && !usadosActo.has(n);
+    let i = bag.findIndex(libre);
+    if (i < 0) i = bag.findIndex((n) => n !== ultimoNombre);
+    if (i < 0) {
+      bag.push(...barajar(POOLS[kind].slice()));
+      i = bag.findIndex(libre);
+      if (i < 0) i = bag.findIndex((n) => n !== ultimoNombre);
+      if (i < 0) i = bag.length - 1;
     }
-    return x;
+
+    return bag.splice(i, 1)[0];
+  }
+
+  function devolver(kind, name) {
+    if (!bags[kind]) bags[kind] = [];
+    bags[kind].push(name);
+  }
+
+  // Busca el hueco más despejado. Si no llega al mínimo, usa el menos malo.
+  function elegirX(ocupados) {
+    let mejor = 0.5, mejorDist = -1;
+    for (let i = 0; i < 24; i++) {
+      const x = 0.08 + rng() * 0.84;
+      let d = 1;
+      for (const u of ocupados) d = Math.min(d, Math.abs(u - x));
+      if (d > mejorDist) { mejorDist = d; mejor = x; }
+      if (d >= CFG.minGap) break;
+    }
+    return mejor;
+  }
+
+  function solapan(a0, a1, b0, b1) {
+    return a0 < b1 && b0 < a1;
+  }
+
+  function conflicto(name, group, t, dur, activos, reserved) {
+    const fin = t + dur;
+
+    // El final ya trae eclipse, meteoritos, terremoto y fuego: no le sumamos ruido.
+    if (reserved && solapan(t, fin, reserved.start, reserved.end)) {
+      if (group === 'full' || group === 'fuego' || group === 'agua' || name === 'luna' || name === 'lluvia') return true;
+    }
+
+    // Los desastres de pantalla completa necesitan aire entre ellos.
+    if (group === 'full' && reserved && fin > reserved.start - CFG.fullGap && t < reserved.end) return true;
+
+    for (const o of activos) {
+      if (group === 'full' && o.group === 'full' && t < o.end + CFG.fullGap && o.start < fin + CFG.fullGap) return true;
+      if (!solapan(t, fin, o.start, o.end)) continue;
+      if (group === 'full' && o.group === 'full') return true;
+      if (group === 'fuego' && o.group === 'agua') return true;
+      if (group === 'agua' && o.group === 'fuego') return true;
+      if (group === 'fuego' && (o.name === 'lluvia' || o.name === 'tormenta')) return true;
+      if (o.group === 'fuego' && (name === 'lluvia' || name === 'tormenta')) return true;
+      if ((name === 'eclipse' && o.name === 'luna') || (name === 'luna' && o.name === 'eclipse')) return true;
+      if ((name === 'tormenta' && (o.name === 'lluvia' || o.name === 'viento')) ||
+          (o.name === 'tormenta' && (name === 'lluvia' || name === 'viento'))) return true;
+    }
+
+    if (group === 'cielo') {
+      let n = 0;
+      for (const o of activos) {
+        if (o.group === 'cielo' && solapan(t, fin, o.start, o.end)) n++;
+      }
+      if (n >= CFG.maxSky) return true;
+    }
+    return false;
+  }
+
+  // Prefiere quemar objetos que llevan más tiempo en escena (los primeros).
+  function elegirObjetivo(placed) {
+    const ventana = Math.max(1, Math.ceil(placed.length / 2));
+    return Math.floor(rng() * ventana);
+  }
+
+  // Intenta colocar un evento concreto. Si no cabe, devuelve null sin tocar nada.
+  function colocar(name, kind, nominal, win, intensidad, activos, placed, usedX, inicios, reserved) {
+    if (kind === 'object' && placed.length >= CFG.maxProps) return null;
+
+    const dur = DUR[name] || 0;
+    const group = GRUPO[name] || GRUPO_KIND[kind];
+    let x = 0.5, burns = null, objetivo = -1;
+
+    if (kind === 'object') {
+      x = elegirX(usedX);
+    } else if (kind === 'hazard') {
+      if (name === 'incendio' && placed.length) {
+        objetivo = elegirObjetivo(placed);
+        x = placed[objetivo].x;
+        burns = placed[objetivo].name;
+      } else {
+        x = elegirX(usedX);
+      }
+    } else if (kind === 'sky') {
+      const ocupados = activos.filter((o) => o.group === 'cielo').map((o) => o.x);
+      x = elegirX(ocupados);
+    }
+
+    const limite = reserved
+      ? Math.min(win.end - 250, reserved.start - CFG.minEventGap)
+      : win.end - 250;
+
+    for (let t = nominal; t <= limite; t += 500) {
+      if (inicios.some((s) => Math.abs(s - t) < CFG.minEventGap)) continue;
+      if (conflicto(name, group, t, dur, activos, reserved)) continue;
+
+      const ev = {
+        at: t - win.start,
+        name, kind, layer: LAYER[kind], x,
+        intensity: intensidad,
+        burns,
+      };
+
+      if (kind === 'object') {
+        placed.push({ name, x });
+        usedX.push(x);
+      } else if (kind === 'hazard') {
+        if (objetivo >= 0) placed.splice(objetivo, 1);
+        else if (name === 'incendio') usedX.push(x);
+      }
+
+      activos.push({ name, group, start: t, end: t + dur, x });
+      inicios.push(t);
+      return ev;
+    }
+    return null;
+  }
+
+  function intentar(kind, nominal, win, intensidad, activos, placed, usedX, inicios, reserved) {
+    const probados = [];
+    for (let i = 0; i < POOLS[kind].length; i++) {
+      const name = sacar(kind);
+      const ev = colocar(name, kind, nominal, win, intensidad, activos, placed, usedX, inicios, reserved);
+      if (ev) {
+        probados.forEach((n) => devolver(kind, n));
+        return ev;
+      }
+      probados.push(name);
+    }
+    probados.forEach((n) => devolver(kind, n));
+    return null;
+  }
+
+  function colocarEvento(kind, nominal, win, intensidad, activos, placed, usedX, inicios, reserved) {
+    for (const k of [kind, ...(ALTERNATIVAS[kind] || [])]) {
+      const ev = intentar(k, nominal, win, intensidad, activos, placed, usedX, inicios, reserved);
+      if (ev) return ev;
+    }
+    return null;
   }
 
   function buildPlan() {
-    const placed = [];  // objetos de suelo que ya existen en la obra (candidatos a arder)
+    const placed = [];  // objetos de suelo vivos (candidatos a arder)
+    const usedX = [];   // posiciones de suelo ocupadas (persisten entre actos)
+    const activos = []; // efectos programados, para detectar solapes
     plan = [];
+    bags = {};
+    ultimoNombre = null;
+
+    // Ventanas de reloj: incluyen los interludios porque el escenario sigue
+    // avanzando (y los efectos siguen vivos) mientras se muestra la tarjeta.
+    const ventanas = [];
+    let t = CFG.interludeMs;
+    for (let a = 0; a < CFG.totalActs; a++) {
+      ventanas.push({ start: t, end: t + CFG.actMs[a] });
+      t += CFG.actMs[a] + CFG.interludeMs;
+    }
+
+    // El final se reserva primero: ningún desastre grande puede pisarlo.
+    const ultima = ventanas[CFG.totalActs - 1];
+    const finaleStart = ultima.start + CFG.actMs[CFG.totalActs - 1] * FINALE_AT;
+    const reserved = { start: finaleStart, end: finaleStart + (DUR.finale || 0) };
+
     for (let a = 0; a < CFG.totalActs; a++) {
       const kinds = TEMPLATE[a];
-      const n = kinds.length;
-      const climax = a === CFG.totalActs - 1;
       const len = CFG.actMs[a];
-      const evs = [], usedX = [];
-      let last = null;
+      const win = ventanas[a];
+      const climax = a === CFG.totalActs - 1;
+      const finaleIdx = kinds.indexOf('finale');
+      const nRand = finaleIdx >= 0 ? finaleIdx : kinds.length;
+      const evs = [];
+      const inicios = [];
+      usadosActo = new Set();
 
-      kinds.forEach((kind, k) => {
-        const name = pick(kind, last);
-        last = name;
-        let x = LAYER[kind] === 'full' ? 0.5 : freeX(usedX);
-        let burns = null;
-
-        // Un incendio cae sobre un objeto ya existente y lo quema.
-        if (name === 'incendio' && placed.length) {
-          const i = Math.floor(rng() * placed.length);
-          x = placed[i].x;
-          burns = placed[i].name;
-          placed.splice(i, 1);
+      // Momentos base: reparto parejo con poco azar, para que no haya ráfagas.
+      const nominaciones = kinds.map((kind, k) => {
+        if (kind === 'finale') return win.start + len * FINALE_AT;
+        let f;
+        if (climax) {
+          const fin = FINALE_AT - 0.15;
+          f = 0.05 + (fin - 0.05) * (k / Math.max(1, nRand - 1));
+        } else {
+          f = 0.12 + 0.76 * (k / Math.max(1, kinds.length - 1));
         }
-        if (kind === 'object') placed.push({ name, x });
-        if (LAYER[kind] === 'ground') usedX.push(x);
-
-        // Momento: parejo en actos normales; ACELERADO en el clímax
-        // (los huecos entre eventos se van acortando).
-        const frac = climax
-          ? 0.06 + 0.74 * Math.pow(k / (n - 1), 0.6)
-          : 0.10 + 0.80 * ((k + 0.15 + rng() * 0.7) / n);
-        const intensity = climax
-          ? clamp01(0.7 + 0.3 * (k / (n - 1)))
-          : clamp01(BASE_INTENSITY[a] + (rng() - 0.5) * 0.1);
-
-        evs.push({ at: len * frac, name, kind, layer: LAYER[kind], x, intensity, burns });
+        const jitter = (rng() - 0.5) * 0.05;
+        return win.start + len * clamp01(f + jitter);
       });
 
-      if (climax) {
-        evs.push({ at: len * FINALE_AT, name: 'finale', kind: 'finale', layer: 'full', x: 0.5, intensity: 1, burns: null });
+      // Se colocan en orden temporal; si algo choca, se corre un poco.
+      const orden = kinds
+        .map((kind, k) => ({ kind, k, t: nominaciones[k] }))
+        .filter((x) => x.kind !== 'finale')
+        .sort((p, q) => p.t - q.t);
+
+      for (const item of orden) {
+        const intensidad = climax
+          ? clamp01(0.7 + 0.3 * (item.k / Math.max(1, nRand - 1)))
+          : clamp01(BASE_INTENSITY[a] + (rng() - 0.5) * 0.1);
+        const ev = colocarEvento(item.kind, item.t, win, intensidad, activos, placed, usedX, inicios, reserved);
+        if (ev) {
+          evs.push(ev);
+          ultimoNombre = ev.name;
+          usadosActo.add(ev.name);
+        }
       }
+
+      if (climax) {
+        evs.push({
+          at: len * FINALE_AT,
+          name: 'finale', kind: 'finale', layer: 'full',
+          x: 0.5, intensity: 1, burns: null,
+        });
+      }
+
       evs.sort((p, q) => p.at - q.at);
       plan.push(evs);
     }
@@ -202,6 +407,7 @@ const Acts = (() => {
     get actProgress() { return phase === 'act' ? phaseT / actLen() : 0; },
     get replayProgress() { return storyT ? Math.min(1, replayT / storyT) : 0; },
     get log() { return log; },
+    get plan() { return plan; },
     get seed() { return seed; },
   };
 })();

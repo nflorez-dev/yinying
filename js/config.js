@@ -52,6 +52,24 @@ const CFG = {
   TRACK_LOST_FRAMES: 15, // fotogramas sin ver una mano antes de olvidarla
 };
 
+// Duración de los eventos del escenario (ms). La comparten acts.js (para
+// planificar sin solapar efectos) y escenario.js (para dibujarlos).
+const DURACIONES = {
+  lluvia: 12000,
+  viento: 8000,
+  luna: 22000,
+  "estrella fugaz": 1800,
+  nube: 16000,
+  inundacion: 14000,
+  tormenta: 14000,
+  eclipse: 14000,
+  terremoto: 8000,
+  meteoritos: 10000,
+  incendio: 7000,
+  fogata: 7000,
+  finale: 9500,
+};
+
 // Derivados
 const W = CFG.BASE_W * CFG.ESCALA; // 1280
 const H = CFG.BASE_H * CFG.ESCALA; // 720
